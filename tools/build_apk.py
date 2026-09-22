@@ -432,6 +432,83 @@ def rename_package(base):
     dest.parent.mkdir(parents=True,exist_ok=True)
     source.rename(dest)
 
+ICON_ENTRY = 0x5c            # manifest application icon: 0x7f02005c (drawable)
+ICON_PATH = b'res/drawable-notlong-nodpi/p_16_dd_parts_pe_launchericon.png'
+
+def _arsc_chunks(data, parent, chunk_type):
+    """Yield offsets of chunks of a type inside a table/package chunk."""
+    pos=parent+int.from_bytes(data[parent+2:parent+4],'little')
+    end=parent+int.from_bytes(data[parent+4:parent+8],'little')
+    while pos<end:
+        size=int.from_bytes(data[pos+4:pos+8],'little')
+        if int.from_bytes(data[pos:pos+2],'little')==chunk_type:
+            yield pos
+        pos+=size
+
+def _arsc_pool_string(data, pool, index):
+    off=int.from_bytes(data[pool+28+4*index:pool+32+4*index],'little')
+    off+=pool+int.from_bytes(data[pool+20:pool+24],'little')
+    if int.from_bytes(data[pool+16:pool+18],'little')&0x100:  # UTF-8 pool
+        def read_len(pos):
+            head=data[pos]
+            if head&0x80:
+                return ((head&0x7f)<<8)|data[pos+1],2
+            return head,1
+        _,used=read_len(off)
+        length,extra=read_len(off+used)
+        return bytes(data[off+used+extra:off+used+extra+length])
+    length=int.from_bytes(data[off:off+2],'little')
+    return bytes(data[off+2:off+2+2*length])
+
+def launcher_icon_fixup(data, add=False):
+    """The base APK ships the manifest icon only under long/notlong-qualified
+    drawable configs (with their bits swapped), so some launchers resolve no
+    icon at all. Add it to the unqualified drawable config, which matches
+    every device configuration."""
+    pkg=next(_arsc_chunks(data,0,0x0200))
+    global_pool=12
+    assert int.from_bytes(data[global_pool:global_pool+2],'little')==1
+    pool_index=next(i for i in range(int.from_bytes(data[global_pool+8:global_pool+12],'little'))
+                    if _arsc_pool_string(data,global_pool,i)==ICON_PATH)
+    default=None; donor=None
+    for pos in _arsc_chunks(data,pkg,0x0201):
+        if data[pos+8]!=2: continue
+        cfg=pos+20; header=int.from_bytes(data[pos+2:pos+4],'little')
+        entries=int.from_bytes(data[pos+16:pos+20],'little')
+        if data[cfg+28]==0 and data[cfg+12]==0:
+            default=pos
+        else:
+            off=int.from_bytes(data[pos+header+4*ICON_ENTRY:pos+header+4*ICON_ENTRY+4],'little')
+            if off!=0xffffffff:
+                donor=int.from_bytes(data[pos+entries+off+4:pos+entries+off+8],'little')
+    assert default is not None and donor is not None
+    header=int.from_bytes(data[default+2:default+4],'little')
+    entries=int.from_bytes(data[default+16:default+20],'little')
+    slot=default+header+4*ICON_ENTRY
+    if add:
+        assert int.from_bytes(data[slot:slot+4],'little')==0xffffffff, 'icon entry already present'
+        size=int.from_bytes(data[default+4:default+8],'little')
+        value=(8).to_bytes(2,'little')+b'\x00\x00'+donor.to_bytes(4,'little') \
+             +(8).to_bytes(2,'little')+b'\x00\x03'+pool_index.to_bytes(4,'little')
+        data[slot:slot+4]=(size-entries).to_bytes(4,'little')
+        data[default+4:default+8]=(size+len(value)).to_bytes(4,'little')
+        data[default+size:default+size]=value
+        for parent in (pkg,0):  # enclosing package and table chunk sizes
+            old=int.from_bytes(data[parent+4:parent+8],'little')
+            data[parent+4:parent+8]=(old+len(value)).to_bytes(4,'little')
+        return
+    off=int.from_bytes(data[slot:slot+4],'little')
+    assert off!=0xffffffff, 'icon entry missing from default drawable config'
+    e=default+entries+off
+    assert data[e+11]==3, 'icon entry must be a string value'
+    assert _arsc_pool_string(data,global_pool,int.from_bytes(data[e+12:e+16],'little'))==ICON_PATH
+
+def patch_launcher_icon(work):
+    data=bytearray((work/'resources.arsc').read_bytes())
+    launcher_icon_fixup(data,add=True)
+    launcher_icon_fixup(data)
+    (work/'resources.arsc').write_bytes(data)
+
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument('--input',type=Path,required=True)
@@ -455,6 +532,7 @@ def main():
     profiles=combined_profiles(fuji,args.upstream_hook)
     subprocess.run(['java','-jar',str(args.apktool),'d','-r','-f',str(args.input),'-o',str(args.work)],check=True)
     patch_hook(args.work/'smali'/OLD.replace('.','/')/'shooting/camera/RicohHook.smali',profiles,args.upstream_hook,args.movie)
+    patch_launcher_icon(args.work)
     patch_menu(args.work,profiles)
     patch_icons(args.work,profiles)
     if args.movie:patch_movie(args.work)

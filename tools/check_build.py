@@ -12,6 +12,7 @@ import tempfile
 import zipfile
 import numpy as np
 from fit_luts import sample, read_cube, apply_model
+from build_apk import launcher_icon_fixup
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -69,6 +70,9 @@ def main():
         assert np.allclose(sample(exported,nodes),apply_model(nodes,m/1024,g/1023),atol=1e-6)
     apks=list((ROOT/'output').glob('*.apk'))
     assert apks, 'No APK builds found'
+    for apk in apks:
+        with zipfile.ZipFile(apk) as z:
+            launcher_icon_fixup(bytearray(z.read('resources.arsc')))
     results={apk.name:dict(signed_entries=check_signature(apk),
         sha256=hashlib.sha256(apk.read_bytes()).hexdigest()) for apk in apks}
     report=dict(cube_axis_test='passed',profile_bounds_test='passed',
