@@ -12,7 +12,7 @@ import tempfile
 import zipfile
 import numpy as np
 from fit_luts import sample, read_cube, apply_model
-from build_apk import launcher_icon_fixup
+from build_apk import launcher_icon_fixup, launcher_icon_paths
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -56,14 +56,14 @@ def main():
     points=np.array([[0,0,0],[1,1,1],[.13,.72,.41],[1,0,.4]])
     assert np.allclose(sample(cube,points),points,atol=1e-12)
     data=json.loads((ROOT/'profiles/film_studio.json').read_text())
-    assert len(data['presets'])==15 and len({p['id'] for p in data['presets']})==15
+    assert len(data['presets'])==19 and len({p['id'] for p in data['presets']})==19
     for p in data['presets']:
         m=np.array(p['matrix']);g=np.array(p['gamma'])
         assert m.shape==(3,3) and m.min()>=-2048 and m.max()<=3072
         assert g.shape==(1024,) and g.min()>=0 and g.max()<=1023 and np.all(np.diff(g)>=0)
         if p['family']=='ricoh':
             continue
-        assert p['family']=='fujifilm' and np.all(m.sum(1)==1024)
+        assert p['family'] in ('fujifilm','mono-sim') and np.all(m.sum(1)==1024)
         exported=read_cube(ROOT/'output'/f'SonyProxy_{p["official_film"].replace(".","")}.cube')
         # Grid nodes round-trip exactly, including cube boundaries.
         nodes=np.array([[0,0,0],[1,1,1],[.25,.5,.75]])
@@ -72,7 +72,17 @@ def main():
     assert apks, 'No APK builds found'
     for apk in apks:
         with zipfile.ZipFile(apk) as z:
-            launcher_icon_fixup(bytearray(z.read('resources.arsc')))
+            data=bytearray(z.read('resources.arsc'))
+            launcher_icon_fixup(data)
+            # Every config that resolves a launcher icon must point at a real
+            # PNG. Bodies with a "long" drawable config (A7M1) read this entry,
+            # and the base ships a 67-byte placeholder in that slot.
+            names=set(z.namelist())
+            for name in launcher_icon_paths(data):
+                name=name.decode()
+                assert name in names, '%s missing from %s'%(name,apk.name)
+                assert len(z.read(name))>1000, \
+                    '%s is a placeholder, not an icon (%s)'%(name,apk.name)
     results={apk.name:dict(signed_entries=check_signature(apk),
         sha256=hashlib.sha256(apk.read_bytes()).hexdigest()) for apk in apks}
     report=dict(cube_axis_test='passed',profile_bounds_test='passed',

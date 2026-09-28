@@ -57,14 +57,17 @@ def ricoh_profiles(path):
 
 
 def combined_profiles(fuji, upstream_hook):
-    if len(fuji) != 10:
-        raise ValueError('Expected the existing ten Fujifilm-reference profiles')
+    if len(fuji) != 14:
+        raise ValueError('Expected ten Fujifilm-reference plus four simulated mono profiles')
     profiles = copy.deepcopy(fuji)
     for p in profiles:
+        if p.get('family') == 'mono-sim':
+            p['guide'] = '模拟无CFA全光谱响应黑白；合成加权矩阵，非富士LUT，需实拍验证。'
+            continue
         p['family'] = 'fujifilm'
         p['name'] = '富士 ' + p['name']
         p['guide'] = p['official_film'] + ' / 富士官方LUT近似；需实拍校准。'
     profiles += ricoh_profiles(upstream_hook)
-    if len({p['id'] for p in profiles}) != 15:
+    if len({p['id'] for p in profiles}) != 19:
         raise ValueError('Preset IDs must be unique; keep existing Fujifilm IDs for upgrades')
     return profiles

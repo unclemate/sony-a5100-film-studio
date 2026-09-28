@@ -27,7 +27,7 @@ def fields(text):
     return result
 
 
-def compiled_profile_arrays(decoded, hook):
+def compiled_profile_arrays(decoded, hook, profiles=19):
     """Verify the final DEX has isolated initializers and valid lookup targets."""
     initializer = re.search(r'^\.method [^\n]* <clinit>\(\)V\n(.*?)^\.end method',
                             hook, re.M | re.S)
@@ -41,7 +41,7 @@ def compiled_profile_arrays(decoded, hook):
         'Availability checks must not load profile arrays'
     references = re.findall(
         r'sget-object v0, (L[^;]+\$Profile\d+_\d+;)->(sFuji\w+):(\[[IB])', hook)
-    assert len(references) == 120 and len(set(references)) == 120, \
+    assert len(references) == profiles * 8 and len(set(references)) == profiles * 8, \
         'Every matrix/gamma lookup must target its own holder field exactly once'
     expected = {}
     for owner, name, kind in references:
@@ -49,7 +49,7 @@ def compiled_profile_arrays(decoded, hook):
         expected[name] = (owner, kind)
     arrays = {}
     holder_paths = sorted((decoded/HOOK_PATH).parent.glob('RicohHook$Profile*.smali'))
-    assert len(holder_paths) == 60, 'Expected one holder per preset/strength pair'
+    assert len(holder_paths) == profiles * 4, 'Expected one holder per preset/strength pair'
     for path in holder_paths:
         text = path.read_text()
         owner = re.search(r'^\.class [^\n]* (L[^;]+;)$', text, re.M)[1]
@@ -84,7 +84,7 @@ def main():
     profiles = json.loads((ROOT/'profiles/film_studio.json').read_text())['presets']
     hook = (args.decoded/HOOK_PATH).read_text()
     arrays = compiled_profile_arrays(args.decoded, hook)
-    assert len(profiles) == 15 and len(arrays) == 120
+    assert len(profiles) == 19 and len(arrays) == 152
     for i, p in enumerate(profiles):
         for strength in STRENGTHS:
             expected = blend_profile(p, strength)
@@ -93,7 +93,7 @@ def main():
             assert arrays[f'sFujigamma{i}_{strength}'] == raw
     # Independent upstream input: verify both tinted and neutral presets retain
     # exact original values in the built DEX at the 100% endpoint.
-    for i, p in enumerate(ricoh_profiles(args.upstream_hook), 10):
+    for i, p in enumerate(ricoh_profiles(args.upstream_hook), 14):
         assert profiles[i]['id'] == p['id']
         assert arrays[f'sFujimatrix{i}_100'] == sum(p['matrix'], [])
         assert arrays[f'sFujigamma{i}_100'] == [b for v in p['gamma'] for b in (v & 255, v >> 8)]
@@ -102,7 +102,7 @@ def main():
     ids = [p['id'] for p in profiles]
     assert [e.get('ItemId') for e in top] == ids
     assert [e.get('Value') for e in top] == ids
-    assert verify_icons(args.decoded, profiles) == 15
+    assert verify_icons(args.decoded, profiles) == 19
     for method in ['getPresetIds', 'getRGBMatrix', 'getGammaBytes', 'getFilterName', 'getFilterGuide', 'isRicohPreset']:
         body = re.search(r'^\.method [^\n]* ' + method + r'\([^\n]*\n(.*?)^\.end method', hook, re.M | re.S)
         assert body, method
@@ -117,25 +117,44 @@ def main():
     for old in ['理光相机', '富士风格']:
         assert old.encode() not in resources and old.encode('utf-16-le') not in resources
     previous_count = None
+    previous_compared = None
     if args.previous_decoded:
         previous_hook = (args.previous_decoded/HOOK_PATH).read_text()
+        previous_profile_count = len(list(
+            (args.previous_decoded/HOOK_PATH).parent.glob('RicohHook$Profile*.smali'))) // 4 or 15
         previous = fields(previous_hook)
         if not previous:
-            previous = compiled_profile_arrays(args.previous_decoded, previous_hook)
+            previous = compiled_profile_arrays(
+                args.previous_decoded, previous_hook, previous_profile_count)
         assert len(previous) in (80, 120)
-        for field, values in previous.items():
-            assert arrays[field] == values, field
+        # Holder fields are indexed by menu position; after inserting the mono
+        # presets the Ricoh indices shifted. Compare every strength for the
+        # positions whose preset ID still matches, and report only what was
+        # actually compared.
+        old_menu = ET.parse(args.previous_decoded/'assets/MenuData.xml')
+        old_top = next(e for e in old_menu.iter() if e.get('ItemId') == 'ApplicationTop')
+        old_ids = [e.get('ItemId') for e in old_top]
+        compared = 0
+        for i, preset_id in enumerate(old_ids):
+            if i < len(ids) and ids[i] == preset_id:
+                for strength in STRENGTHS:
+                    for kind in ('matrix', 'gamma'):
+                        field = f'sFuji{kind}{i}_{strength}'
+                        assert arrays[field] == previous[field], field
+                        compared += 1
         previous_count = len(previous)
+        previous_compared = compared
     report = dict(
-        profiles=15, strengths=list(STRENGTHS), compiled_arrays_checked=len(arrays),
-        lazy_profile_holders=60, hook_eager_profile_arrays=0,
+        profiles=19, strengths=list(STRENGTHS), compiled_arrays_checked=len(arrays),
+        lazy_profile_holders=76, hook_eager_profile_arrays=0,
         first_selected_profile_array_bytes=2084, previous_eager_profile_array_bytes=125040,
         startup_timing_measured=False,
         upstream_ricoh_full_strength_exact=True,
-        previous_compiled_arrays_unchanged=previous_count,
-        previous_fuji_arrays_unchanged=min(previous_count, 80) if previous_count else None,
+        previous_build_profile_count=previous_profile_count if args.previous_decoded else None,
+        previous_build_array_count=previous_count,
+        previous_same_id_arrays_compared=previous_compared,
         menu_and_lookup_ids_match=True, renamed_resources=True,
-        distinct_filter_badges_checked=15,
+        distinct_filter_badges_checked=19,
         movie_standby_shortcut_present=True, hardware_verified=False,
     )
     (ROOT/'validation/combined-static.json').write_text(json.dumps(report, indent=2))

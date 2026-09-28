@@ -45,6 +45,16 @@ BADGES = {
                       'p_16_dd_parts_specialscreen_icon_pictureeffect_illust_high_normal'),
     'ricoh-cross':    ('XP', 'R', (170, 176, 235),
                       'p_16_dd_parts_specialscreen_icon_pictureeffect_illust_low_normal'),
+    # Simulated de-Bayer mono presets reuse otherwise-unreferenced specialscreen
+    # icon slots (constant declarations in R$drawable only).
+    'mono-plain':     ('MB', 'S', (208, 208, 208),
+                      'p_16_dd_parts_specialscreen_icon_pictureeffect_posbw_normal'),
+    'mono-yellow':    ('MY', 'S', (216, 182, 66),
+                      'p_16_dd_parts_specialscreen_icon_pictureeffect_richbw_normal'),
+    'mono-green':     ('MG', 'S', (122, 190, 122),
+                      'p_16_dd_parts_specialscreen_icon_pictureeffect_poscol_normal'),
+    'mono-red':       ('MR', 'S', (216, 92, 92),
+                      'p_16_dd_parts_specialscreen_icon_pictureeffect_highcontrastmonochrome_normal'),
 }
 
 # Original 5x7 glyphs. Only the small set of letters needed by the badges is used.
@@ -55,6 +65,7 @@ FONT = {
     'D': ('11110', '10001', '10001', '10001', '10001', '10001', '11110'),
     'E': ('11111', '10000', '10000', '11110', '10000', '10000', '11111'),
     'F': ('11111', '10000', '10000', '11110', '10000', '10000', '10000'),
+    'G': ('01111', '10000', '10000', '10111', '10001', '10001', '01111'),
     'H': ('10001', '10001', '10001', '11111', '10001', '10001', '10001'),
     'M': ('10001', '11011', '10101', '10101', '10001', '10001', '10001'),
     'N': ('10001', '11001', '11001', '10101', '10011', '10011', '10001'),
@@ -64,6 +75,7 @@ FONT = {
     'T': ('11111', '00100', '00100', '00100', '00100', '00100', '00100'),
     'V': ('10001', '10001', '10001', '10001', '10001', '01010', '00100'),
     'X': ('10001', '10001', '01010', '00100', '01010', '10001', '10001'),
+    'Y': ('10001', '10001', '01010', '00100', '00100', '00100', '00100'),
 }
 
 
@@ -198,7 +210,8 @@ def verify_icons(base, profiles):
 
 def contact_sheet(path):
     """Write a local design-review sheet; not packaged with the camera app."""
-    width, height = 400, 210
+    rows = -(-len(BADGES) // 5)
+    width, height = 400, rows * 70 + 10
     pixels = bytearray(bytes((35, 39, 43, 255)) * width * height)
     for index, preset_id in enumerate(BADGES):
         badge = badge_pixels(preset_id)

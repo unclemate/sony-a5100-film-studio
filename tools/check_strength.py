@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     profiles = json.loads((ROOT/'profiles/film_studio.json').read_text())['presets']
-    assert len(profiles) == 15
+    assert len(profiles) == 19
     for p in profiles:
         assert blend_profile(p, 100) == {k: p[k] for k in ('matrix', 'gamma')}, p['id']
         assert blend_profile(p, 0) == {

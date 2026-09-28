@@ -434,6 +434,7 @@ def rename_package(base):
 
 ICON_ENTRY = 0x5c            # manifest application icon: 0x7f02005c (drawable)
 ICON_PATH = b'res/drawable-notlong-nodpi/p_16_dd_parts_pe_launchericon.png'
+PLACEHOLDER_ICON_PATH = b'res/drawable-long-nodpi/p_16_dd_parts_pe_launchericon.png'
 
 def _arsc_chunks(data, parent, chunk_type):
     """Yield offsets of chunks of a type inside a table/package chunk."""
@@ -496,17 +497,45 @@ def launcher_icon_fixup(data, add=False):
         for parent in (pkg,0):  # enclosing package and table chunk sizes
             old=int.from_bytes(data[parent+4:parent+8],'little')
             data[parent+4:parent+8]=(old+len(value)).to_bytes(4,'little')
-        return
-    off=int.from_bytes(data[slot:slot+4],'little')
-    assert off!=0xffffffff, 'icon entry missing from default drawable config'
-    e=default+entries+off
-    assert data[e+11]==3, 'icon entry must be a string value'
-    assert _arsc_pool_string(data,global_pool,int.from_bytes(data[e+12:e+16],'little'))==ICON_PATH
+    repair_launcher_icons(data)
+    assert not add or int.from_bytes(data[slot:slot+4],'little')!=0xffffffff
+
+def repair_launcher_icons(data):
+    """The base ships a 67-byte drawable-long-nodpi placeholder for the icon, so
+    bodies whose drawable config is "long" (A7M1) resolve it and show no icon.
+    Repoint every config carrying that placeholder at the full launcher icon."""
+    pkg=next(_arsc_chunks(data,0,0x0200))
+    global_pool=12
+    pool_index=next(i for i in range(int.from_bytes(data[global_pool+8:global_pool+12],'little'))
+                    if _arsc_pool_string(data,global_pool,i)==ICON_PATH)
+    for pos in _arsc_chunks(data,pkg,0x0201):
+        if data[pos+8]!=2: continue
+        header=int.from_bytes(data[pos+2:pos+4],'little')
+        entries=int.from_bytes(data[pos+16:pos+20],'little')
+        off=int.from_bytes(data[pos+header+4*ICON_ENTRY:pos+header+4*ICON_ENTRY+4],'little')
+        if off==0xffffffff: continue
+        e=pos+entries+off
+        if data[e+11]!=3: continue
+        if _arsc_pool_string(data,global_pool,int.from_bytes(data[e+12:e+16],'little'))==PLACEHOLDER_ICON_PATH:
+            data[e+12:e+16]=pool_index.to_bytes(4,'little')
+
+def launcher_icon_paths(data):
+    """Every file path the icon resource resolves to, one per drawable config."""
+    pkg=next(_arsc_chunks(data,0,0x0200))
+    for pos in _arsc_chunks(data,pkg,0x0201):
+        if data[pos+8]!=2: continue
+        header=int.from_bytes(data[pos+2:pos+4],'little')
+        entries=int.from_bytes(data[pos+16:pos+20],'little')
+        slot=pos+header+4*ICON_ENTRY
+        off=int.from_bytes(data[slot:slot+4],'little')
+        if off==0xffffffff: continue
+        e=pos+entries+off
+        if data[e+11]!=3: continue
+        yield _arsc_pool_string(data,12,int.from_bytes(data[e+12:e+16],'little'))
 
 def patch_launcher_icon(work):
     data=bytearray((work/'resources.arsc').read_bytes())
     launcher_icon_fixup(data,add=True)
-    launcher_icon_fixup(data)
     (work/'resources.arsc').write_bytes(data)
 
 def main():
@@ -566,9 +595,9 @@ def main():
                   camera_tested=False,encoded_video_filter_verified=False,
                   source_apk_sha256=EXPECTED,profiles=len(profiles),
                   app_name=APP_NAME,android_version=ANDROID_VERSION,
-                  profile_families={'fujifilm':10,'ricoh':5},
+                  profile_families={'fujifilm':10,'mono-sim':4,'ricoh':5},
                   live_filter_preview=True,preview_debounce_ms=120,
-                  unique_filter_icons=15,lazy_profile_holders=60,
+                  unique_filter_icons=19,lazy_profile_holders=76,
                   startup_timing_measured=False)
     (root/'profiles/film_studio.json').write_text(json.dumps(dict(
         version=VERSION,presets=profiles),ensure_ascii=False,indent=2))

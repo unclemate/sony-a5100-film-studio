@@ -27,6 +27,16 @@ FILMS = [
     ("ACROS", "fuji-acros", "ACROS 黑白"),
 ]
 
+# Simulated de-Bayer monochrome presets: no source LUT. Each row is the same
+# luminance weighting (flat spectral response or a filter factor); rows sum to
+# 1024 so the neutral axis stays neutral, and the curve is the identity ramp.
+MONO_SIM = [
+    ("MONO", "mono-plain", "去拜耳 黑白", (1/3, 1/3, 1/3)),
+    ("MONO-Y", "mono-yellow", "去拜耳 黄镜", (0.28, 0.62, 0.10)),
+    ("MONO-G", "mono-green", "去拜耳 绿镜", (0.15, 0.75, 0.10)),
+    ("MONO-R", "mono-red", "去拜耳 红镜", (0.55, 0.42, 0.03)),
+]
+
 def read_cube(path):
     size = None
     rows = []
@@ -169,6 +179,17 @@ def main():
         write_cube(root/'output'/f'SonyProxy_{token.replace(".","")}.cube',
                    matrix_i/1024,curve_i/1023,token)
         print(token,'MAE',round(metric['rgb_mae'],4),'p95',round(metric['rgb_p95'],4))
+    for token,slot,label,weights in MONO_SIM:
+        head=[round(w*1024) for w in weights[:2]]
+        row=[head[0],head[1],1024-sum(head)]
+        assert min(row) >= 0 and max(row) <= 3072, 'mono weighting out of bounds: ' + token
+        matrix_mono=[row]*3
+        curve_mono=list(range(1024))
+        profiles.append(dict(id=slot,name=label,official_film=token,family='mono-sim',
+            source_file='simulated de-Bayer weighting',
+            matrix=matrix_mono,gamma=curve_mono))
+        write_cube(root/'output'/f'SonyProxy_{token}.cube',
+                   np.asarray(matrix_mono)/1024,np.asarray(curve_mono)/1023,token)
     data = dict(schema=1,version='0.1.0-alpha',source_url='https://dl.fujifilm-x.com/support/lut/gfx-eterna-55-3d-lut-v110.zip',
         neutral_proxy=neutral_path.name,
         limitations=['Sony Standard is not calibrated to the official WDR-709 neutral reference.',

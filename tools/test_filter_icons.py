@@ -78,16 +78,16 @@ class FilterIconTests(unittest.TestCase):
             self.assertEqual(raw[:4], b'\0\0\0\0')
             masks.add(bytes(raw[(y * 70 + x) * 4:(y * 70 + x) * 4 + 3] == b'\xf7\xf7\xf2'
                             for y in range(21, 42) for x in range(18, 51)))
-        self.assertEqual(len(masks), 15)
+        self.assertEqual(len(masks), 19)
 
     def test_all_configurations_linked_without_changing_resource_table(self):
         before = (self.base / 'resources.arsc').read_bytes()
         manifest = patch_icons(self.base, self.profiles)
-        self.assertEqual(verify_icons(self.base, self.profiles), 15)
+        self.assertEqual(verify_icons(self.base, self.profiles), 19)
         self.assertEqual((self.base / 'resources.arsc').read_bytes(), before)
-        self.assertEqual(len(manifest['presets']), 15)
-        self.assertEqual(len({entry['resource'] for entry in manifest['presets']}), 15)
-        self.assertEqual(len({entry['sha256'] for entry in manifest['presets']}), 15)
+        self.assertEqual(len(manifest['presets']), 19)
+        self.assertEqual(len({entry['resource'] for entry in manifest['presets']}), 19)
+        self.assertEqual(len({entry['sha256'] for entry in manifest['presets']}), 19)
         for entry in manifest['presets']:
             self.assertEqual(len(entry['files']), 2)
             for name in entry['files']:
